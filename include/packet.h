@@ -10,8 +10,8 @@ typedef struct{
         PACKET_S2C_PLAYER_JOIN,
         // Send to all players
         PACKET_S2C_NEW_PLAYER_JOINED,
-        // Send to server
-        PACKET_C2S_SET_POS,
+        // Send to n players/server
+        PACKET_BIDIR_SET_POS,
         // Send to n players
         PACKET_S2C_GAME_SYNC,
     } type;
@@ -25,7 +25,7 @@ typedef struct{
         struct {
             int player_id;
             Vec2i pos;
-        } c2s_set_pos;
+        } bidir_set_pos;
         struct {
             Game game;
         } s2c_game_sync;

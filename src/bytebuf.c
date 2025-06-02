@@ -31,10 +31,6 @@ uint8_t byte_buf_read_byte(ByteBuf *buf) {
 }
 
 int32_t byte_buf_read_int(ByteBuf *buf) {
-  if (buf->writer_index < sizeof(int32_t)) {
-    return 0;
-  }
-
   int32_t integer = 0;
 
   for (int i = 0; i < sizeof(int32_t); i++) {

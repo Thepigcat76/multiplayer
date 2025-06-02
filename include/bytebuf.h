@@ -8,7 +8,6 @@
 
 typedef struct {
   uint8_t bytes[512];
-  size_t len;
   size_t writer_index;
   size_t reader_index;
   size_t capacity;
