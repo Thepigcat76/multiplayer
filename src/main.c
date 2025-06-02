@@ -1,125 +1,231 @@
-#include <stdio.h>
-#include <string.h>
-
 #include <arpa/inet.h>
-#include <netdb.h>
+#include <pthread.h>
+#include <raylib.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "threads.c"
-
 #include "raylib.h"
+
+#include "bytebuf.h"
 
 #define PORT 12345
 
-static void server() {
-  const int fd = socket(PF_INET, SOCK_STREAM, 0);
+static void send_bytebuf(int fd, ByteBuf *buf) {}
 
-  struct sockaddr_in addr;
+void *run_server(void *args) {
+  int client_fd = ((int *)args)[0];
+  int server_fd = ((int *)args)[1];
+
+  while (1) {
+    const char *message = "Hello from server\n";
+    send(client_fd, message, strlen(message), 0);
+    sleep(1); // Send every 1 second
+  }
+
+  close(client_fd);
+  close(server_fd);
+  return NULL;
+}
+
+void *run_server_listener(void *args) {
+  int client_fd = ((int *)args)[0];
+
+  char buffer[1024];
+  while (1) {
+    ssize_t bytes = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+    if (bytes <= 0) {
+      printf("Disconnected.\n");
+      break;
+    }
+    buffer[bytes] = '\0';
+    printf("Received: %s", buffer);
+  }
+  return NULL;
+}
+
+void multithreaded_server() {
+  int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_fd < 0) {
+    perror("socket failed");
+    return;
+  }
+
+  // Allow address reuse
+  int opt = 1;
+  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+  struct sockaddr_in addr = {0};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = INADDR_ANY;
   addr.sin_port = htons(PORT);
 
-  if (bind(fd, (struct sockaddr *)&addr, sizeof(addr))) {
-    perror("bind error:");
+  if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    perror("bind failed");
+    close(server_fd);
     return;
   }
 
-  socklen_t addr_len = sizeof(addr);
-  getsockname(fd, (struct sockaddr *)&addr, &addr_len);
-  printf("server is on port %d\n", (int)ntohs(addr.sin_port));
-
-  if (listen(fd, 1)) {
-    perror("listen error:");
+  if (listen(server_fd, 1) < 0) {
+    perror("listen failed");
+    close(server_fd);
     return;
   }
 
-  struct sockaddr_storage caddr;
-  socklen_t caddr_len = sizeof(caddr);
-  const int cfd = accept(fd, (struct sockaddr *)&caddr, &caddr_len);
+  printf("Server listening on port %d\n", PORT);
 
-  char buf[1024];
-  bool sent = false;
-
-  while (true) {
-    ssize_t bytes = recv(cfd, buf, sizeof(buf) - 1, 0);
-    if (bytes <= 0) {
-      // connection closed or error
-      break;
-    }
-
-    buf[bytes] = '\0'; // Null-terminate received string
-    printf("client says:\n    %s\n", buf);
-    if (!sent) {
-      const char *msg = "Hello client";
-      send(cfd, msg, strlen(msg) + 1, 0);
-      // sent = true;
-    }
+  struct sockaddr_in client_addr;
+  socklen_t client_len = sizeof(client_addr);
+  int client_fd =
+      accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+  if (client_fd < 0) {
+    perror("accept failed");
+    close(server_fd);
+    return;
   }
 
-  close(cfd);
-  close(fd);
+  printf("Client connected!\n");
+
+  pthread_t logic_thread;
+  pthread_t networking_listener_thread;
+
+  int args[] = {client_fd, server_fd};
+  if (pthread_create(&logic_thread, NULL, run_server, args)) {
+    perror("Failed to create logic thread");
+    exit(1);
+  }
+
+  if (pthread_create(&networking_listener_thread, NULL, run_server_listener,
+                     args)) {
+    perror("Failed to create networking listener thread");
+    exit(1);
+  }
+
+  pthread_join(logic_thread, NULL);
+  pthread_join(networking_listener_thread, NULL);
+  printf("Game has finished\n");
 }
 
-static void client(int port) {
-  InitWindow(800, 600, "Multiplayer test");
+static bool send_pos = false;
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+typedef struct {
+  int player_x;
+  int player_y;
+} Game;
+
+static Game GAME = {.player_x = 0, .player_y = 0};
+
+void *run_game(void *) {
+  InitWindow(800, 600, "Hello");
   SetTargetFPS(60);
-
-  const int fd = socket(PF_INET, SOCK_STREAM, 0);
-
-  struct sockaddr_in addr = {0};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons((short)port);
-
-  // connect to local machine at specified port
-  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-
-  // connect to server
-  if (connect(fd, (struct sockaddr *)&addr, sizeof(addr))) {
-    perror("connect error:");
-    return;
-  }
-
-  // say hey with send!
-
-  const char *hello = "Initial hello";
-  send(fd, hello, strlen(hello) + 1, 0);
 
   while (!WindowShouldClose()) {
     BeginDrawing();
     {
       ClearBackground(RAYWHITE);
-      DrawCircle(400, 300, 40, RED);
-      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-          CheckCollisionPointCircle(GetMousePosition(), (Vector2){400, 300},
-                                    40)) {
-        const char *msg = "Deez";
-        send(fd, msg, strlen(msg) + 1, 0);
+      DrawCircle(GAME.player_x, GAME.player_y, 20, RED);
+      // TraceLog(LOG_INFO, "Time: %d", (int)GetTime());
+      if (IsKeyDown(KEY_W)) {
+        GAME.player_y -= 3;
+      }
+      if (IsKeyDown(KEY_S)) {
+        GAME.player_y += 3;
+      }
+      if (IsKeyDown(KEY_A)) {
+        GAME.player_x -= 3;
+      }
+      if (IsKeyDown(KEY_D)) {
+        GAME.player_x += 3;
       }
 
-      // Read from server
-      char buf[1024];
-      ssize_t bytes =
-          recv(fd, buf, sizeof(buf) - 1, MSG_DONTWAIT); // non-blocking
-      if (bytes > 0) {
-        buf[bytes] = '\0';
-        printf("server says: %s\n", buf);
+      if ((int)GetTime() % 3 == 0) {
+        pthread_mutex_lock(&mutex);
+        send_pos = true;
+        // pthread_cond_signal(&cond);
+        pthread_mutex_unlock(&mutex);
       }
     }
     EndDrawing();
   }
+  CloseWindow();
+  return NULL;
+}
 
-  close(fd);
+void *run_client(void *) {
+  int sock = socket(AF_INET, SOCK_STREAM, 0);
+  if (sock < 0) {
+    perror("socket failed");
+    return NULL;
+  }
+
+  struct sockaddr_in server_addr = {0};
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = htons(PORT);
+
+  inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
+
+  if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    perror("connect failed");
+    close(sock);
+    return NULL;
+  }
+
+  printf("Connected to server!\n");
+
+  while (1) {
+    char buffer[1024];
+    ssize_t bytes = recv(sock, buffer, sizeof(buffer) - 1, 0);
+    if (bytes <= 0) {
+      printf("Disconnected.\n");
+      break;
+    }
+    buffer[bytes] = '\0';
+    printf("Received: %s", buffer);
+
+    if (bytes > 4) {
+      const char *msg = "Received your message\n";
+      send(sock, msg, strlen(msg) + 1, 0);
+    }
+
+    // pthread_mutex_lock(&mutex);
+    // TraceLog(LOG_INFO, "SET BLUE");
+    //  pthread_cond_signal(&cond);
+    // pthread_mutex_unlock(&mutex);
+  }
+
+  close(sock);
+  return NULL;
+}
+
+void multithreaded_client() {
+  pthread_t game_thread;
+  pthread_t networking_thread;
+
+  if (pthread_create(&game_thread, NULL, run_game, NULL)) {
+    perror("Failed to create game thread");
+    exit(1);
+  }
+
+  if (pthread_create(&networking_thread, NULL, run_client, NULL)) {
+    perror("Failed to create networking thread");
+    exit(1);
+  }
+
+  pthread_join(game_thread, NULL);
+  pthread_join(networking_thread, NULL);
+  printf("Game has finished\n");
 }
 
 int main(int argc, char *argv[]) {
-  if (argc > 1 && !strcmp(argv[1], "--client")) {
-    client(PORT);
+  if (argc > 1 && strcmp(argv[1], "--client") == 0) {
+    multithreaded_client();
   } else {
-    server();
+    multithreaded_server();
   }
-
-  threads_example();
-
   return 0;
 }
