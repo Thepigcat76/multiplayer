@@ -5,7 +5,7 @@ Props = {
     std = "gnu23",
     version = "0.1",
     type = "bin",
-    compiler = "gcc",
+    compiler = "clang",
 }
 
 -- external dependenciess

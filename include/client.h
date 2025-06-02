@@ -5,10 +5,10 @@
 #include <bits/pthreadtypes.h>
 
 typedef struct {
+    int player_id;
     int server_address;
-    int client_addresses[MAX_PLAYERS];
     Game game;
-    pthread_mutex_t server_mutex;
-} Server;
+    pthread_mutex_t client_mutex;
+} Client;
 
-void server_run();
+void client_run();
