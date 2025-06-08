@@ -26,3 +26,19 @@ Libraries = {
 Exclude = {
     "threads.c"
 }
+
+WinLibraries = {
+    "winraylib",
+    "opengl32",
+    "gdi32",
+    "winmm",
+    "wincjson",
+    "pthread",
+    "ws2_32"
+}
+
+Params = {
+    "-static-libgcc",
+    "-static-libstdc++",
+    "-static"
+}

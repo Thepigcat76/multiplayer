@@ -2,7 +2,6 @@
 
 #include "game.h"
 #include "pthread.h"
-#include <bits/pthreadtypes.h>
 
 typedef struct {
     int player_id;

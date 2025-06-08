@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game.h"
+#include <stdbool.h>
 
 typedef struct{
     enum {
@@ -32,6 +33,6 @@ typedef struct{
     } var;
 } Packet;
 
-void packet_send(int addr, Packet packet);
+void packet_send(int addr, Packet packet, bool is_client);
 
-Packet packet_receive(int addr);
+Packet packet_receive(int addr, bool is_client);

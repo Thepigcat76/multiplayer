@@ -32,15 +32,3 @@ void byte_buf_from_bin(ByteBuf *buf, const char *str_buf);
 void byte_buf_from_file(ByteBuf *buf, const char *name);
 
 void byte_buf_to_file(const ByteBuf *buf, const char *name);
-
-#define byte_buf_write_list(buf, func, list, len)                              \
-  byte_buf_write_int(buf, len);                                                \
-  for (int i = 0; i < len; i++) {                                              \
-    func(buf, list[i]);                                                        \
-  }
-
-#define byte_buf_read_list(buf, func, list)                                    \
-  int32_t len = byte_buf_read_int(buf);                                        \
-  for (int i = 0; i < len; i++) {                                              \
-    list[i] = func(buf);                                                       \
-  }

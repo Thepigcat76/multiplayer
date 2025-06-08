@@ -1,24 +1,20 @@
+#include "../include/sockets.h"
 #include "../include/server.h"
 #include "../include/packet.h"
-#include <arpa/inet.h>
 #include <pthread.h>
-#include <raylib.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
-static Server SERVER = {.game = {.players = 0, .player_positions = {0}},
-                        .server_mutex = PTHREAD_MUTEX_INITIALIZER};
+static GameServer SERVER = {
+    .game = {.players = 0, .player_positions = {0}},
+    .game_server_mutex = PTHREAD_MUTEX_INITIALIZER,
+};
 
 static void *server_logic(void *args) {
   int server_fd = ((int *)args)[0];
 
   while (1) {
-    const char *message = "Hello from server\n";
-    // send(client_fd, message, strlen(message), 0);
-    sleep(1); // Send every 1 second
   }
   return NULL;
 }
@@ -26,26 +22,25 @@ static void *server_logic(void *args) {
 static void handle_packet(Packet packet) {
   switch (packet.type) {
   case PACKET_BIDIR_SET_POS: {
-    pthread_mutex_lock(&SERVER.server_mutex);
+    pthread_mutex_lock(&SERVER.game_server_mutex);
     {
       int player_id = packet.var.bidir_set_pos.player_id;
       Vec2i pos = packet.var.bidir_set_pos.pos;
       SERVER.game.player_positions[player_id] = pos;
+      printf("Players: %d\n", SERVER.game.players);
       for (int i = 0; i < SERVER.game.players; i++) {
-        if (i != player_id) {
-      printf("Sent pos x: %d, y: %d to client\n", pos.x, pos.y);
-          packet_send(
-              SERVER.client_addresses[i],
-              (Packet){
-                  .type = PACKET_BIDIR_SET_POS,
-                  .var = {
-                      .bidir_set_pos = {
-                          .player_id = player_id,
-                          .pos = SERVER.game.player_positions[player_id]}}});
-        }
+        printf("SENT SET POS\n");
+        packet_send(
+            SERVER.client_addresses[i],
+            (Packet){
+                .type = PACKET_BIDIR_SET_POS,
+                .var = {.bidir_set_pos =
+                            {.player_id = player_id,
+                             .pos = SERVER.game.player_positions[player_id]}}},
+            false);
       }
     }
-    pthread_mutex_unlock(&SERVER.server_mutex);
+    pthread_mutex_unlock(&SERVER.game_server_mutex);
     break;
   }
   default: {
@@ -54,29 +49,55 @@ static void handle_packet(Packet packet) {
   }
 }
 
+#define MAX_CLIENTS 32 // Adjust as needed
+
+static void handle_connection(int32_t client_addr) {
+  Packet packet = packet_receive(client_addr, false);
+  if (packet.type == PACKET_ERROR) {
+    fprintf(stderr, "Error or disconnect on fd %d\n", client_addr);
+    // Optionally remove player or close connection here
+    return;
+  }
+
+  handle_packet(packet);
+
+  printf("Received packet: %d from: %d\n", packet.type, client_addr);
+}
+
 static void *server_listener(void *args) {
-  int server_addr = ((int *)args)[0];
+  struct pollfd fds[MAX_CLIENTS];
 
   while (1) {
-    if (SERVER.game.players > 0) {
-      for (int i = 0; i < SERVER.game.players; i++) {
-        Packet packet = packet_receive(SERVER.client_addresses[i]);
-        handle_packet(packet);
+    pthread_mutex_lock(&SERVER.game_server_mutex);
+    size_t client_addresses_amount = SERVER.game.players;
+    for (int i = 0; i < client_addresses_amount; i++) {
+      fds[i].fd = SERVER.client_addresses[i];
+      fds[i].events = POLLIN;
+    }
+    pthread_mutex_unlock(&SERVER.game_server_mutex);
 
-        if (packet.type == PACKET_ERROR) {
-          continue;
-        }
-
-        printf("Received packet: %d from: %d out of %d players\n", packet.type,
-               SERVER.client_addresses[i], SERVER.game.players);
-      }
+#ifdef SURTUR_BUILD_WIN
+    int poll_result = WSAPoll(fds, client_addresses_amount, 100);
+#else
+    int poll_result = poll(fds, client_addresses_amount, 100);
+#endif
+    if (poll_result < 0) {
+      perror("poll failed");
+      continue;
     }
 
-    // TODO: Fix Disconnect
-    // if (bytes <= 0) {
-    //  printf("Disconnected.\n");
-    //  break;
-    //}
+    for (int i = 0; i < client_addresses_amount; i++) {
+      if (fds[i].revents & POLLIN) {
+        int client_fd = fds[i].fd;
+
+        handle_connection(client_fd);
+      }
+      if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+        fprintf(stderr, "Client %d disconnected or error\n", fds[i].fd);
+        sockets_close(fds[i].fd);
+        // You may want to mark the player slot as disconnected
+      }
+    }
   }
   return NULL;
 }
@@ -87,79 +108,44 @@ static void *server_player_join_listener(void *args) {
 
   while (1) {
     printf("Waiting to accept new player\n");
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    int client_fd =
-        accept(server_addr, (struct sockaddr *)&client_addr, &client_len);
-    printf("NEW PLAYER JOINED\n");
-
-    if (client_fd < 0) {
-      perror("accept failed");
-      close(server_addr);
-      return NULL;
-    }
+    long client_fd = sockets_server_accept_client(server_addr);
     printf("client id valid\n");
 
-    pthread_mutex_lock(&SERVER.server_mutex);
+    pthread_mutex_lock(&SERVER.game_server_mutex);
     {
-      int players = SERVER.game.players;
-      int player_id = players;
-      SERVER.game.players++;
-      printf("players: %d\n", players);
+      int player_id = SERVER.game.players++;
+      printf("players: %d\n", SERVER.game.players);
       SERVER.client_addresses[player_id] = client_fd;
 
       packet_send(
           client_fd,
           (Packet){.type = PACKET_S2C_PLAYER_JOIN,
-                   .var = {.s2c_player_join = {.player_id = player_id}}});
+                   .var = {.s2c_player_join = {.player_id = player_id}}},
+          false);
       packet_send(client_fd,
                   (Packet){.type = PACKET_S2C_GAME_SYNC,
-                           .var = {.s2c_game_sync = {.game = SERVER.game}}});
-      for (int i = 0; i < players; i++) {
+                           .var = {.s2c_game_sync = {.game = SERVER.game}}},
+                  false);
+      for (int i = 0; i < SERVER.game.players; i++) {
         packet_send(SERVER.client_addresses[i],
                     (Packet){.type = PACKET_S2C_NEW_PLAYER_JOINED,
-                             .var = {.s2c_new_player_joined = {
-                                         .player_id = player_id}}});
+                             .var = {.s2c_new_player_joined = {.player_id =
+                                                                   player_id}}},
+                    false);
       }
 
       printf("Client connected!\n");
     }
-    pthread_mutex_unlock(&SERVER.server_mutex);
+    pthread_mutex_unlock(&SERVER.game_server_mutex);
   }
   return NULL;
 }
 
 static int server_start() {
-  int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_fd < 0) {
-    perror("socket failed");
-    return -1;
-  }
-
-  SERVER.server_address = server_fd;
-
-  // Allow address reuse
-  int opt = 1;
-  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-  struct sockaddr_in addr = {.sin_family = AF_INET,
-                             .sin_addr.s_addr = INADDR_ANY,
-                             .sin_port = htons(PORT)};
-
-  if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    perror("bind failed");
-    close(server_fd);
-    return -1;
-  }
-
-  if (listen(server_fd, 10) < 0) {
-    perror("listen failed");
-    close(server_fd);
-    return -1;
-  }
+  int sock = sockets_open_server(IP_ADDRESS, PORT);
 
   printf("Server listening on port %d\n", PORT);
-  return server_fd;
+  return sock;
 }
 
 void server_run() {
@@ -196,5 +182,5 @@ void server_run() {
   pthread_join(logic_thread, NULL);
   printf("Game has finished\n");
 
-  close(server_addr);
+  sockets_close(server_addr);
 }
