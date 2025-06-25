@@ -1,11 +1,30 @@
 // REMEMBER: Sending a vec2 might not have worked because of little/big endian
 // (look at jdh video)
+#ifdef SURTUR_BUILD_WIN
+#define Rectangle winapiIsSoOldAndGrossSoMangleIt_Rectangle
+#define CloseWindow winapiIsSoOldAndGrossSoMangleIt_CloseWindow
+#define ShowCursor winapiIsSoOldAndGrossSoMangleIt_ShowCursor
+#define LoadImage winapiIsSoOldAndGrossSoMangleIt_LoadImage
+#define DrawText winapiIsSoOldAndGrossSoMangleIt_DrawText
+#define DrawTextEx winapiIsSoOldAndGrossSoMangleIt_DrawTextEx
+#define PlaySound winapiIsSoOldAndGrossSoMangleIt_PlaySound
+
+#include <winsock2.h>
+#include "windows.h"
+
+#undef Rectangle
+#undef CloseWindow
+#undef ShowCursor
+#undef LoadImage
+#undef DrawText
+#undef DrawTextEx
+#undef PlaySound
+#endif
 
 #ifdef SURTUR_BUILD_WIN
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <stdio.h>
-#include <winsock2.h>
 #endif
 #include "../include/client.h"
 #include "../include/server.h"
@@ -29,6 +48,3 @@ int main(int argc, char *argv[]) {
 #endif
   return 0;
 }
-/*
-
-*/

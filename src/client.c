@@ -1,3 +1,24 @@
+#ifdef SURTUR_BUILD_WIN
+#define Rectangle winapiIsSoOldAndGrossSoMangleIt_Rectangle
+#define CloseWindow winapiIsSoOldAndGrossSoMangleIt_CloseWindow
+#define ShowCursor winapiIsSoOldAndGrossSoMangleIt_ShowCursor
+#define LoadImage winapiIsSoOldAndGrossSoMangleIt_LoadImage
+#define DrawText winapiIsSoOldAndGrossSoMangleIt_DrawText
+#define DrawTextEx winapiIsSoOldAndGrossSoMangleIt_DrawTextEx
+#define PlaySound winapiIsSoOldAndGrossSoMangleIt_PlaySound
+
+#include <winsock2.h>
+#include "windows.h"
+
+#undef Rectangle
+#undef CloseWindow
+#undef ShowCursor
+#undef LoadImage
+#undef DrawText
+#undef DrawTextEx
+#undef PlaySound
+#endif
+
 #include "../include/client.h"
 #include "../include/packet.h"
 #include "../include/sockets.h"

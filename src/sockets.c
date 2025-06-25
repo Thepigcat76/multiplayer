@@ -9,9 +9,9 @@
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <poll.h>
 #endif
 #include <stdio.h>
 
@@ -24,7 +24,8 @@ int32_t sockets_open_server(char *ip_address, uint32_t port) {
   int sock = socket(AF_INET, SOCK_STREAM, 0);
   setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 #endif
-  struct sockaddr_in server_socket = {.sin_family = AF_INET, .sin_port = htons(port)};
+  struct sockaddr_in server_socket = {.sin_family = AF_INET,
+                                      .sin_port = htons(port)};
   if (inet_pton(AF_INET, ip_address, &server_socket.sin_addr) <= 0) {
     perror("inet_pton failed (invalid IP)");
     sockets_close(sock);
@@ -36,7 +37,8 @@ int32_t sockets_open_server(char *ip_address, uint32_t port) {
     return -1;
   }
 
-  if (bind(sock, (struct sockaddr *)&server_socket, sizeof(server_socket)) < 0) {
+  if (bind(sock, (struct sockaddr *)&server_socket, sizeof(server_socket)) <
+      0) {
     perror("bind failed");
     sockets_close(sock);
     return -1;
@@ -81,10 +83,12 @@ int32_t sockets_connect_to_server(char *ip_address, uint32_t port) {
 int64_t sockets_server_accept_client(int32_t socket_addr) {
   struct sockaddr_in client_addr;
   socklen_t client_len = sizeof(client_addr);
-  #ifdef SURTUR_BUILD_WIN
-    SOCKET client_fd = accept(socket_addr, (struct sockaddr *)&client_addr, &client_len);
+#ifdef SURTUR_BUILD_WIN
+  SOCKET client_fd =
+      accept(socket_addr, (struct sockaddr *)&client_addr, &client_len);
 #else
-    int client_fd = accept(socket_addr, (struct sockaddr *)&client_addr, &client_len);
+  int client_fd =
+      accept(socket_addr, (struct sockaddr *)&client_addr, &client_len);
 #endif
 
   if (client_fd < 0) {
@@ -105,7 +109,35 @@ int64_t sockets_receieve(int32_t socket_addr, SocketDataBuffer buf,
   return recv(socket_addr, buf.buffer, buf.buffer_size, 0);
 }
 
-void sockets_server_listen_to_clients(ConnectionHandleFunc connection_handle_func) {
+void sockets_server_listen_to_clients(
+    ConnectionHandleFunc connection_handle_func) {}
+
+int64_t sockets_server_poll_clients(PollClient *client_addresses,
+                                    uint64_t client_addresses_amount,
+                                    int32_t timeout) {
+  if (client_addresses_amount > 0) {
+
+#ifdef SURTUR_BUILD_WIN
+    int poll_result =
+        WSAPoll(client_addresses, client_addresses_amount, timeout);
+#else
+    int poll_result = poll(client_addresses, client_addresses_amount, timeout);
+#endif
+    return poll_result;
+  }
+  return 0;
+}
+
+void sockets_server_handle_poll(int64_t result) {
+#ifdef SURTUR_BUILD_WIN
+  if (result == SOCKET_ERROR) {
+    fprintf(stderr, "WSAPoll failed: %d\n", WSAGetLastError());
+  }
+#else
+  if (result < 0) {
+    perror("poll failed");
+  }
+#endif
 }
 
 void sockets_close(int socket_addr) {

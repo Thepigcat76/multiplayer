@@ -1,6 +1,6 @@
-#include "../include/sockets.h"
 #include "../include/server.h"
 #include "../include/packet.h"
+#include "../include/sockets.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,27 +64,33 @@ static void handle_connection(int32_t client_addr) {
   printf("Received packet: %d from: %d\n", packet.type, client_addr);
 }
 
+#define _INVALID_SOCKET (int)(~0)
+
 static void *server_listener(void *args) {
   struct pollfd fds[MAX_CLIENTS];
 
   while (1) {
     pthread_mutex_lock(&SERVER.game_server_mutex);
     size_t client_addresses_amount = SERVER.game.players;
+
     for (int i = 0; i < client_addresses_amount; i++) {
-      fds[i].fd = SERVER.client_addresses[i];
-      fds[i].events = POLLIN;
+      int s = SERVER.client_addresses[i];
+      if (s == _INVALID_SOCKET || s == 0) {
+        fprintf(stderr,
+                "[DEBUG] Skipping invalid socket at index %d (fd=%lld)\n", i,
+                (long long)s);
+        fds[i].fd = _INVALID_SOCKET;
+        fds[i].events = 0;
+      } else {
+        fds[i].fd = s;
+        fds[i].events = POLLRDNORM;
+      }
     }
     pthread_mutex_unlock(&SERVER.game_server_mutex);
 
-#ifdef SURTUR_BUILD_WIN
-    int poll_result = WSAPoll(fds, client_addresses_amount, 100);
-#else
-    int poll_result = poll(fds, client_addresses_amount, 100);
-#endif
-    if (poll_result < 0) {
-      perror("poll failed");
-      continue;
-    }
+    int poll_result = sockets_server_poll_clients(fds, client_addresses_amount, 100);
+
+    sockets_server_handle_poll(poll_result);
 
     for (int i = 0; i < client_addresses_amount; i++) {
       if (fds[i].revents & POLLIN) {
